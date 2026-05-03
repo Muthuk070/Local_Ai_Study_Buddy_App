@@ -18,6 +18,7 @@ from study_rag_service.vector_db.client import store_chunk
 from services.auth_service.auth.dependencies import check_token
 from study_rag_service.vector_db.client import collection
 from openai import OpenAI
+from study_rag_service.note_quality import NoteQualityCheck
 from study_rag_service.note_quality import page_wise_figures
 from study_rag_service.ingestion.file_loader import create_folder
 from study_rag_service.ingestion.file_loader import extract_fig_sentences_from_chunks
@@ -90,6 +91,8 @@ async def upload_notes(
         validate_file(file.filename)  #backend validating the file type, whether its valid pdf or not
 
 
+
+
         # 1. Save and Extract
         try:
          content = await file.read()
@@ -106,13 +109,26 @@ async def upload_notes(
         #2. Extracting the raw content from the file and also doing some cleaning to remove unwanted characters and formatting issues that might affect the chunking and embedding generation process, also to ensure that the extracted text is in a suitable format for further processing and storage in the vector database for efficient retrieval during search queries based on user input.
         print("Extracting raw content...")
         raw_text = extract_pdf_content(file_path)
-        
 
-       # raw_text = raw_text[:300000]
-        
+
+        #3.AGENTIC NOTE QUALITY CHECK FLOW
+
+        print(" Performing note quality check...")
+        newpath = NoteQualityCheck(file_path, raw_text)
+        if newpath!=0:
+                 with open(newpath, "r", encoding="utf-8") as f:
+                    raw_text_1 = f.read()
+                 try:
+                    raw_text = raw_text_1
+                    os.remove(newpath)
+                 except Exception:
+                    pass
+
+
+        # raw_text = raw_text[:300000]
         os.remove(file_path) #removing the temporarily stored file after processing
         
-        # 3. Get token for all the extracted +minial cleaned text 
+        #4. Get token for all the extracted +minial cleaned text 
         Y = tiktoken_len(raw_text)
         
 
@@ -120,25 +136,21 @@ async def upload_notes(
         print(f"Total Chunks Created: {len(chunks)}") #each chunks count
 
         note_id=str(uuid.uuid4())
-        subject = subject.lower().strip().replace(" ", "_")
-        class_standard = class_standard.lower().strip()
 
         #     Metadata structure ready for ChromaDB/Pinecone + storing this info in notes_chunks table
         metadata = {
-                "class_standard":class_standard,  
-                "subject":subject,  
+                "class_standard":class_standard.lower().strip(), 
+                "subject":subject.lower().strip().replace(" ", "_"), 
                 "teacher_id":teacher_id, 
                 "status" : "active",
                 "Total_chunks_created": Y
             }
         
         await insert_note_record(note_id, teacher_id, class_standard, subject, metadata['status'],metadata['Total_chunks_created']) 
-        # await cursor.execute("Insert into notes (log_id,teacher_id,class_standard,subjects,status,total_chunks_created) values (%s,%s,%s,%s,%s,%s)",
-        #     (note_id,teacher_id,class_standard,subject,metadata['status'],metadata['Total_chunks_created']))
-        # await conn.commit()
         
         
-        # 4. Debug Loop
+        
+        # 5. Debug Loop
         for i in range(len(chunks)):
             current_content = chunks[i].page_content 
             print(f"\n{'='*20} CHUNK {i} {'='*20}")
@@ -174,9 +186,7 @@ async def student_study(
  ):
     conn,cursor,dict_cursor = db
 
-    # await cursor.execute("""SELECT distinct class_standard, subjects FROM notes WHERE status='active'""")
-
-    # rows = await cursor.fetchall()
+    
     rows = await notes_fetch()  #fetching the data from the database using the function defined in common/database.py to get the available class standards and subjects for which the notes are available for study, so that the student can select the class standard and subject to start studying the notes and also to ask questions to the chatbot based on the selected class standard and subject.
 
     if not rows:
@@ -310,22 +320,3 @@ async def chatbot_ask_questions(
 
 
 
-
-
-
-    ##takes for to prompt function calling, to check whether the overall file context is valid or not by checking the threshold. 
-    ###text02 = prompt_to_check_threshold(text)
-    ###validate_file(file.filename)  #validating the file type
-
-    ####temp_path = await save_temp_file(file) #saving the file by read & writing in a temporarily file creation for processing
-
-    ###if file.filename.endswith(".pdf"):    #cleaning the data by extracting text from the file based on the file type
-    ###    text002 = extract_pdf_content(temp_path)
-
-     
-
-
-    ###if text002 == "" or text002 is None:#threshold is overall above 70% so we can proceed with the teacher upaloded file for chunking & embedding generation and storing in vector db, else we can reject the file and ask for better quality file.
-    
-        
-    
