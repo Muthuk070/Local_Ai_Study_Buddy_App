@@ -15,5 +15,9 @@ chromadb
 openai
 PyMuPDF 
 wandb
+langchain
+langchain-openai
+langchain-core
+langgraph
 
 
